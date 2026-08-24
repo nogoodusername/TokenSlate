@@ -386,10 +386,25 @@ tokenslate-tdisplay-s3/
    The actual current measurement (multimeter/USB power meter, target low hundreds of µA) was
    **not done** — skipped for now; revisit before Milestone 8's battery validation if it still
    hasn't been measured by then.
-1. **Display bring-up.** LVGL/TFT_eSPI demo running on battery power (not just USB); confirm
-   `PIN_POWER_ON`/backlight sequencing works on cold boot and after wake-from-sleep. Also
-   calibrate `USB_PRESENT_THRESHOLD_V` (§14) against a multimeter on your actual unit — the
-   ESP32-S3 ADC is imprecise enough that the starting constant shouldn't be trusted blind.
+1. **Display bring-up — done.** TFT_eSPI demo confirmed on battery power: `PIN_POWER_ON`/backlight
+   sequencing works correctly on cold boot and after wake-from-sleep. Firmware split into
+   `board_pins.h`, `power/battery.cpp .h`, `power/sleep_states.cpp .h`, `ui/screens.cpp .h`
+   modules (§10). Battery ADC read (`power/battery.cpp`, GPIO4, §14) is wired into the boot flow
+   and produces correct voltage/percentage readings.
+   **Known open issue:** with USB attached, deep-sleep entry intermittently freezes after the
+   ADC is read that boot — reproduced identically across three different ADC read APIs
+   (`analogRead`, `analogReadMilliVolts`, direct esp-idf `adc1_get_raw`), so it isn't specific to
+   one API. A live on-screen tick counter confirmed the CPU stays fully alive through the freeze
+   window and the freeze happens specifically inside/around `enterSleep()`. Critically, the
+   freeze reproduces only when a USB host is attached but **not actively reading** the serial
+   port — with an active monitor attached (even just polling), the exact same firmware cycles
+   through sleep/wake reliably every time. Points to a native-USB-CDC stack issue on this board
+   (already flaky in several unrelated ways during Milestone 0), not an application bug; not
+   resolved further without a hardware debugger (JTAG) or a second physical unit to rule out a
+   board-specific fault. Does not appear to affect battery-only operation.
+   `USB_PRESENT_THRESHOLD_V` (§14) still needs calibrating against a multimeter on your actual
+   unit — the ESP32-S3 ADC is imprecise enough that the starting constant shouldn't be trusted
+   blind.
 2. **BLE peripheral skeleton.** NimBLE service + snapshot characteristic advertising; confirm
    discoverable with a generic BLE scanner (e.g. nRF Connect) before wiring up the bridge.
 3. **Host bridge CLI skeleton.** `tokenslate` package installable via `pip install -e`; `run`
