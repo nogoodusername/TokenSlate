@@ -54,4 +54,4 @@ and the build milestones — lives in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATI
 
 ## License
 
-TBD.
+MIT — see [LICENSE](LICENSE). Free to use, modify, and distribute.
