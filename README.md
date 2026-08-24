@@ -50,7 +50,7 @@ Press **KEY** to wake and cycle screens. Press **BOOT** to put the device to sle
 ## Documentation
 
 The full implementation handoff — power design, BLE protocol, firmware and bridge architecture,
-and the build milestones — lives in [`DOCUMENTATION.md`](DOCUMENTATION.md).
+and the build milestones — lives in [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md).
 
 ## License
 
