@@ -32,6 +32,37 @@ static lcd_cmd_t lcd_st7789v[] = {
     {0xE1, {0XF0, 0X08, 0X0C, 0X0B, 0X09, 0X24, 0X2B, 0X22, 0X43, 0X38, 0X15, 0X16, 0X2F, 0X37}, 14},
 };
 
+/* AW9364DNR backlight driver: brightness is set by pulse-counting on
+ * PIN_LCD_BL, not PWM. level tracks the chip's current state across
+ * calls (it has no readback), so this must be the only writer of
+ * PIN_LCD_BL once initDisplay() has run. */
+static uint8_t s_backlightLevel = 0;
+
+void setBacklightBrightness(uint8_t level)
+{
+    if (level > BACKLIGHT_MAX_LEVEL) level = BACKLIGHT_MAX_LEVEL;
+
+    if (level == 0) {
+        digitalWrite(PIN_LCD_BL, LOW);
+        delay(3);
+        s_backlightLevel = 0;
+        return;
+    }
+    if (s_backlightLevel == 0) {
+        digitalWrite(PIN_LCD_BL, HIGH);
+        s_backlightLevel = BACKLIGHT_MAX_LEVEL;
+        delayMicroseconds(30);
+    }
+    int from = BACKLIGHT_MAX_LEVEL - s_backlightLevel;
+    int to = BACKLIGHT_MAX_LEVEL - level;
+    int pulses = (BACKLIGHT_MAX_LEVEL + to - from) % BACKLIGHT_MAX_LEVEL;
+    for (int i = 0; i < pulses; i++) {
+        digitalWrite(PIN_LCD_BL, LOW);
+        digitalWrite(PIN_LCD_BL, HIGH);
+    }
+    s_backlightLevel = level;
+}
+
 void initDisplay(TFT_eSPI &tft)
 {
     tft.begin();
@@ -48,7 +79,8 @@ void initDisplay(TFT_eSPI &tft)
     tft.setRotation(3);
 
     pinMode(PIN_LCD_BL, OUTPUT);
-    digitalWrite(PIN_LCD_BL, HIGH);
+    s_backlightLevel = 0; /* rail was just cut on sleep, so the chip forgot its level too */
+    setBacklightBrightness(DEFAULT_BACKLIGHT_LEVEL);
 }
 
 void renderBringupScreen(TFT_eSPI &tft, uint32_t bootCount, float batteryVoltage)

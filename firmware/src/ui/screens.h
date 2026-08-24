@@ -4,8 +4,18 @@
 
 /* ST7789V init sequence (LCD_MODULE_CMD_1) + rotation/backlight on.
  * Mirrors Xinyuan-LilyGO/T-Display-S3's tft.ino, proven working on
- * this board (see Milestone 0). */
+ * this board (see Milestone 0). Backlight starts at DEFAULT_BACKLIGHT_LEVEL
+ * (see setBacklightBrightness()). */
 void initDisplay(TFT_eSPI &tft);
+
+#define BACKLIGHT_MAX_LEVEL 16
+#define DEFAULT_BACKLIGHT_LEVEL 3  // ~20%, was full-on (16) and too bright
+
+/* The backlight LEDs are driven by an AW9364DNR charge-pump chip, not a
+ * plain GPIO -- brightness is set by pulse-counting on PIN_LCD_BL, not
+ * PWM (see Milestone 0's display bring-up notes). level is 1-16;
+ * 0 turns the backlight fully off. */
+void setBacklightBrightness(uint8_t level);
 
 /* Milestone 1 demo: status text + boot/reset HUD + battery/USB readout.
  * batteryVoltage must be sampled by the caller *before* initDisplay() --

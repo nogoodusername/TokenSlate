@@ -529,6 +529,11 @@ tokenslate-tdisplay-s3/
      with no button press logged, most likely BOOT (GPIO0) getting bumped during USB cable
      handling since it sits right next to the connector — not a regression, already priced into
      the design (EXT1 wake is "free" either way, per §5).
+   - Backlight brightness is now controllable (`ui/screens.h`'s `setBacklightBrightness()`,
+     1-16 levels) using the AW9364DNR's real pulse-counting protocol found during Milestone 0's
+     display bring-up, previously left unused (backlight was just driven full-on). Default set to
+     3/16 (~20%) after visual review — full brightness was uncomfortably bright at normal desk
+     viewing distance.
 7. **Robustness.** Stale/error/reconnecting visuals; bridge-side reconnect/backoff handling if
    the device isn't found on a scan pass.
 8. **Battery validation.** Run for several real days, log actual current draw per state, and
