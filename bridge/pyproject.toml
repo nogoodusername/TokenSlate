@@ -1,0 +1,20 @@
+[project]
+name = "tokenslate"
+version = "0.1.0"
+description = "Host-side BLE bridge between CodexBar and the TokenSlate T-Display-S3 device"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.0",
+    "bleak>=0.21",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+tokenslate = "tokenslate.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tokenslate*"]

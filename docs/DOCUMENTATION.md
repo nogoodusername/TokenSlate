@@ -416,11 +416,31 @@ tokenslate-tdisplay-s3/
    this path is proven end-to-end, folded into Milestone 8's battery validation. This milestone's
    firmware stays awake indefinitely (no idle timeout) so it can be found/connected to at a
    scanner's pace; BOOT still sleeps immediately per §6.
-3. **Host bridge CLI skeleton.** `tokenslate` package installable via `pip install -e`; `run`
-   command doing config loading, `codexbar dashboard` invocation + slimming, the background
-   refresh loop, and a connect-and-write cycle against the Milestone 2 skeleton; `providers`,
-   `config`, and `status` commands wired to a real `config.yaml` and state file; `service
-   install`/`status` tested against your actual OS (launchd or systemd).
+3. **Host bridge CLI skeleton — done.** `tokenslate` package (`bridge/`) installable via
+   `pip install -e bridge/`; all commands (`run`, `service *`, `providers list/select`,
+   `config show/set-*`, `status`) working against a real `config.yaml` and state file.
+   Confirmed end-to-end on hardware: `tokenslate run` and the `launchd`-installed background
+   service both fetch real `codexbar dashboard` data, slim it, and successfully write to the
+   Milestone 2 device over BLE, repeatedly.
+   **Deviates from §9's original assumptions**, since those were written before checking the
+   actual installed CodexBar CLI:
+   - The real command is `codexbar dashboard --timeout N` (not `codexbar dashboard --pretty`
+     alone — `--pretty` still works, just adds formatting) and `codexbar config dump` (not
+     `codexbar config providers`, which doesn't exist).
+   - The real payload schema has a variable-length `windows[]` per provider (e.g. claude has
+     session+weekly, cursor/commandcode have session+weekly+tertiary), not the fixed
+     primary/secondary pair §7 assumed. `codexbar.slim()` currently maps the first two windows
+     onto `p1`/`p2` as a reasonable approximation — revisit the wire protocol properly in
+     Milestone 5 once real per-provider window semantics need to be shown correctly on screen.
+   Two real bugs found and fixed along the way:
+   - **BLE device-name caching**: matching on `BLEDevice.name` (bleak/macOS) returned a stale
+     cached name from some prior connection to the same physical board instead of the live
+     advertisement — fixed by matching on `AdvertisementData.local_name` instead
+     (`bridge/tokenslate/ble.py`). Worth remembering if a scan-based tool ever again reports the
+     "wrong" name for this hardware.
+   - **launchd PATH**: launchd services run with a minimal PATH that excludes Homebrew's
+     `/opt/homebrew/bin`, so the installed service couldn't find `codexbar` at all until
+     `codexbar.py` resolved it explicitly via `shutil.which()` with fallback paths.
 4. **Screen UI.** Build the provider card screen against hardcoded placeholder data.
 5. **Wire it live.** Connect the bridge's payload into the UI via the BLE write handler.
    End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,
