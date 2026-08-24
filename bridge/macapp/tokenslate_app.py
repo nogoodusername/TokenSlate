@@ -33,10 +33,17 @@ class TokenSlateApp(rumps.App):
         self._payload: bytes | None = None
         self._ble_status = "stopped"
         self._last_sync: str | None = None
+        self._discovered_devices: list[str] = []
+        self._devices_dirty = False
 
         self.status_item = rumps.MenuItem("BLE: stopped")
         self.sync_item = rumps.MenuItem("Last sync: never")
         self.toggle_item = rumps.MenuItem("Start Service")
+        self.device_item = rumps.MenuItem(f"Device: {self.cfg.device_name_prefix}")
+        self.set_name_item = rumps.MenuItem("Set Device Name...")
+        self.scan_item = rumps.MenuItem("Scan for Devices...")
+        self.found_devices_menu = rumps.MenuItem("Found Devices")
+        self.found_devices_menu.add(rumps.MenuItem("(no scan yet)"))
         self.about_item = rumps.MenuItem("About TokenSlate")
         self.quit_item = rumps.MenuItem("Quit")
 
@@ -45,6 +52,11 @@ class TokenSlateApp(rumps.App):
             self.sync_item,
             None,
             self.toggle_item,
+            None,
+            self.device_item,
+            self.set_name_item,
+            self.scan_item,
+            self.found_devices_menu,
             None,
             self.about_item,
             self.quit_item,
@@ -79,6 +91,9 @@ class TokenSlateApp(rumps.App):
     def _refresh_ui(self, _timer: rumps.Timer) -> None:
         self.status_item.title = f"BLE: {self._ble_status}"
         self.sync_item.title = f"Last sync: {self._format_sync_time()}"
+        if self._devices_dirty:
+            self._devices_dirty = False
+            self._rebuild_found_devices_menu()
 
     def _format_sync_time(self) -> str:
         if not self._last_sync:
@@ -89,6 +104,57 @@ class TokenSlateApp(rumps.App):
             return local.strftime("%-I:%M %p")
         except (ValueError, TypeError):
             return self._last_sync
+
+    @rumps.clicked("Set Device Name...")
+    def set_device_name(self, _sender: rumps.MenuItem) -> None:
+        response = rumps.Window(
+            message="Device name (or prefix) to scan for -- must match what "
+                    "the firmware advertises, see firmware/src/main.cpp "
+                    "DEVICE_NAME.",
+            title="Set Device Name",
+            default_text=self.cfg.device_name_prefix,
+            ok="Save",
+            cancel="Cancel",
+        ).run()
+        if response.clicked and response.text.strip():
+            name = response.text.strip()
+            self.cfg.device_name_prefix = name
+            self.cfg.save()
+            self.device_item.title = f"Device: {name}"
+
+    @rumps.clicked("Scan for Devices...")
+    def scan_for_devices(self, _sender: rumps.MenuItem) -> None:
+        self.scan_item.title = "Scanning..."
+        threading.Thread(target=self._scan_thread, daemon=True).start()
+
+    def _scan_thread(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            names = loop.run_until_complete(ble.discover_named_devices())
+        except Exception:
+            names = []
+        finally:
+            loop.close()
+        self._discovered_devices = names
+        self._devices_dirty = True  # picked up by the next _refresh_ui tick
+
+    def _rebuild_found_devices_menu(self) -> None:
+        self.scan_item.title = "Scan for Devices..."
+        self.found_devices_menu.clear()
+        if not self._discovered_devices:
+            self.found_devices_menu.add(rumps.MenuItem("(none found)"))
+            return
+        for name in self._discovered_devices:
+            item = rumps.MenuItem(name)
+            item.set_callback(self._select_device(name))
+            self.found_devices_menu.add(item)
+
+    def _select_device(self, name: str):
+        def _handler(_sender: rumps.MenuItem) -> None:
+            self.cfg.device_name_prefix = name
+            self.cfg.save()
+            self.device_item.title = f"Device: {name}"
+        return _handler
 
     @rumps.clicked("About TokenSlate")
     def show_about(self, _sender: rumps.MenuItem) -> None:
@@ -145,22 +211,25 @@ class TokenSlateApp(rumps.App):
             await self._interruptible_sleep(self.cfg.refresh_interval_seconds)
 
     async def _ble_loop(self) -> None:
+        # Scans immediately and on every pass, regardless of whether a
+        # payload is ready yet -- that scan is what triggers macOS's
+        # Bluetooth permission prompt. Gating it behind the first
+        # successful CodexBar fetch (as an earlier version did) delayed
+        # the prompt by however long that fetch took.
         while self._running:
-            if self._payload is None:
-                self._ble_status = "waiting for first sync"
-            else:
-                try:
-                    found = await ble.connect_and_write(
-                        self.cfg.device_name_prefix, self._payload
-                    )
-                    if found:
-                        self._ble_status = "connected (wrote snapshot)"
-                        state = State.load() or State()
-                        state.merge_save(last_seen_device_at=now_iso())
-                    else:
-                        self._ble_status = "device not found (asleep?)"
-                except Exception as e:
-                    self._ble_status = f"error: {e}"
+            try:
+                device = await ble.find_device(self.cfg.device_name_prefix)
+                if device is None:
+                    self._ble_status = "device not found (asleep?)"
+                elif self._payload is None:
+                    self._ble_status = "device found, waiting for first sync"
+                else:
+                    await ble.write_to_device(device, self._payload)
+                    self._ble_status = "connected (wrote snapshot)"
+                    state = State.load() or State()
+                    state.merge_save(last_seen_device_at=now_iso())
+            except Exception as e:
+                self._ble_status = f"error: {e}"
             await self._interruptible_sleep(ble.RESCAN_DELAY_SECONDS)
 
 

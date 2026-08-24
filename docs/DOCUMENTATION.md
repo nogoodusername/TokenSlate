@@ -456,6 +456,24 @@ tokenslate-tdisplay-s3/
    ad-hoc-signs the app on every `v*.*.*` tag push and attaches the zipped bundle to a GitHub
    Release (`workflow_dispatch` also builds, uploading a workflow artifact instead for testing
    without cutting a release).
+
+   **Device name is configurable in the app** (not just via `tokenslate config
+   set-device-name`) — "Set Device Name..." (text prompt) and "Scan for Devices..." (live BLE
+   discovery, builds a "Found Devices" submenu of everything currently advertising; clicking one
+   sets it) are both in the menu, since the advertised name is expected to change from
+   `"TokenSlate-"` in the future. The scan-result submenu's items use `.set_callback()` rather
+   than the `@rumps.clicked` decorator (which needs a title known at decoration time) — not yet
+   confirmed this works in a py2app bundle the same way `@rumps.clicked` does, given the decorator
+   bug already found here; verify on hardware before relying on it.
+
+   **BLE scanning (and therefore the permission prompt) now starts immediately on launch**, not
+   after the first CodexBar fetch completes. Both `run_ble_loop` (CLI) and the app's `_ble_loop`
+   used to gate the entire scan behind having a payload ready to write, which delayed the
+   permission prompt by however long that first fetch took (`codexbar dashboard` defaults to a
+   30s timeout). Fixed by decoupling scanning from writing in `ble.py`
+   (`find_device`/`write_to_device` as separate steps) — the scan (and permission trigger) now
+   happens every pass regardless of payload state; only the write is skipped if there's nothing
+   to send yet.
 4. **Screen UI.** Build the provider card screen against hardcoded placeholder data.
 5. **Wire it live.** Connect the bridge's payload into the UI via the BLE write handler.
    End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,

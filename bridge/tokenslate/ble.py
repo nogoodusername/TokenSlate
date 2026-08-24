@@ -29,6 +29,21 @@ async def find_device(device_name_prefix: str):
     )
 
 
+async def discover_named_devices(timeout: float = SCAN_TIMEOUT_SECONDS) -> list[str]:
+    """All distinct advertised local_names currently in range -- backs a
+    device picker UI (docs §9 macapp) since the device name is expected
+    to change/not always be "TokenSlate-"."""
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    names = {adv.local_name for _, adv in found.values() if adv.local_name}
+    return sorted(names)
+
+
+async def write_to_device(device, payload: bytes) -> None:
+    async with BleakClient(device) as client:
+        await client.write_gatt_char(SNAPSHOT_CHAR_UUID, payload, response=True)
+        log(f"wrote {len(payload)} bytes to {device.name} ({device.address})")
+
+
 async def connect_and_write(device_name_prefix: str, payload: bytes) -> bool:
     """One scan -> connect -> write -> disconnect cycle. Returns True on
     a successful write (device found and reachable), False if the device
@@ -36,10 +51,7 @@ async def connect_and_write(device_name_prefix: str, payload: bytes) -> bool:
     device = await find_device(device_name_prefix)
     if device is None:
         return False
-
-    async with BleakClient(device) as client:
-        await client.write_gatt_char(SNAPSHOT_CHAR_UUID, payload, response=True)
-        log(f"wrote {len(payload)} bytes to {device.name} ({device.address})")
+    await write_to_device(device, payload)
     return True
 
 
@@ -47,16 +59,20 @@ async def run_ble_loop(get_payload: Callable[[], Optional[bytes]], device_name_p
                         on_write: Callable[[], None], stop_event: asyncio.Event) -> None:
     """Runs forever: scan for the device, and if found+awake, write the
     latest cached payload. Sleeps briefly between passes -- cheap, this
-    runs on the host, not the battery-constrained device (docs §9)."""
+    runs on the host, not the battery-constrained device (docs §9).
+
+    Scanning always happens, even before the first payload is ready --
+    that scan is what triggers macOS's Bluetooth permission prompt, and
+    gating it behind a successful CodexBar fetch first delayed that
+    prompt by however long the fetch took."""
     while not stop_event.is_set():
-        payload = get_payload()
-        if payload is None:
-            await asyncio.sleep(RESCAN_DELAY_SECONDS)
-            continue
         try:
-            found = await connect_and_write(device_name_prefix, payload)
-            if found:
-                on_write()
+            device = await find_device(device_name_prefix)
+            if device is not None:
+                payload = get_payload()
+                if payload is not None:
+                    await write_to_device(device, payload)
+                    on_write()
         except Exception as e:
             log(f"BLE cycle failed: {e}")
         await asyncio.sleep(RESCAN_DELAY_SECONDS)
