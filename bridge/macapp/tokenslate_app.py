@@ -51,6 +51,7 @@ class TokenSlateApp(rumps.App):
 
         self.ui_timer = rumps.Timer(self._refresh_ui, 2)
         self.ui_timer.start()
+        self._start()
 
     # --- UI ---------------------------------------------------------
 
