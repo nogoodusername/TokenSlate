@@ -12,6 +12,7 @@ the original conversation.
 ## 1. Goal & constraints
 
 - Show per-provider usage (session %, weekly %, reset countdown) on a small TFT screen.
+- On-screen battery percentage and an indicator for when the device is running on USB power (see §14).
 - Two physical buttons only (a third is a hardware reset, not programmable).
 - Battery-powered — low power consumption is a hard requirement, not a nice-to-have.
 - BLE, not Wi-Fi/HTTP — no server ever opens a network port; the host machine talks to the
@@ -46,7 +47,7 @@ different display driver and pin_config, but the rest of this plan is unaffected
 | GPIO14 | `PIN_BUTTON_2` / KEY | Cycle screens (short press) / force refresh (long press) / wake |
 | GPIO38 | `PIN_LCD_BL` | Backlight (PWM-capable, drive digital HIGH/LOW is enough for v1) |
 | GPIO15 | `PIN_POWER_ON` | LCD/peripheral power rail enable — must be HIGH before using the display, LOW before sleep |
-| GPIO4 | battery ADC | Battery voltage (only readable when USB is unplugged) |
+| GPIO4 | battery ADC | Battery voltage (only readable when USB is unplugged — see §14) |
 | RST | — | Hardware reset line straight to EN. **Not GPIO-addressable, cannot be given custom behavior.** |
 
 Both GPIO0 and GPIO14 are RTC-capable (ESP32-S3 RTC GPIOs span 0–21), so both can be deep-sleep
@@ -93,6 +94,12 @@ Likely mechanism: the parallel display bus pins (WR/RD/DC/CS/D0–D7) aren't RTC
 actively driven; if the panel's rail drops while it's mid-operation, those pins can backfeed
 current into the now-unpowered controller through its ESD diodes. SLPIN lets the controller shut
 its internal charge pumps down cleanly first.
+
+**Also watch out for:** on this board, `Serial` (native USB-CDC) blocks on write/flush when no
+USB host has the port open — e.g. running on battery with no cable attached. Guard every `Serial`
+call with `if (Serial) { ... }`, or a call inside the sleep routine can hang the firmware
+indefinitely before it ever reaches the SLPIN/rail-cut sequence above. Confirmed on hardware
+during Milestone 0 — see `firmware/src/main.cpp`.
 
 ### Power budget (informed estimate, validate in Milestone 0)
 
@@ -244,11 +251,11 @@ enter_sleep():
 
 **UI:** landscape orientation (rotate 90° from native portrait — reads better as a desk display),
 one provider per screen. Each screen: colored provider dot + name top-left, connection/last-sync
-indicator top-right, large radial ring for the primary window (session) with numeric % in the
-center, a horizontal bar for the secondary window (weekly) with reset countdown text below it,
-page-dot indicator at the bottom showing position among configured providers. Visually distinct
-states for live / stale / reconnecting / provider-error — never show a frozen stale number as if
-it were current.
+indicator plus battery/USB-power icon top-right (see §14), large radial ring for the primary
+window (session) with numeric % in the center, a horizontal bar for the secondary window (weekly)
+with reset countdown text below it, page-dot indicator at the bottom showing position among
+configured providers. Visually distinct states for live / stale / reconnecting / provider-error —
+never show a frozen stale number as if it were current.
 
 ---
 
@@ -348,6 +355,7 @@ tokenslate-tdisplay-s3/
 │       ├── main.cpp
 │       ├── ble/gatt_service.cpp .h    # NimBLE peripheral, snapshot characteristic handler
 │       ├── power/sleep_states.cpp .h  # idle timer, EXT1 config, the SLPIN sleep sequence
+│       ├── power/battery.cpp .h       # ADC read, voltage->percent, USB-present heuristic (§14)
 │       ├── ui/screens.cpp .h          # LVGL/TFT_eSPI provider card rendering
 │       ├── ui/theme.h                 # per-provider colors
 │       ├── input/buttons.cpp .h       # OneButton wiring, short/long press classification
@@ -370,13 +378,18 @@ tokenslate-tdisplay-s3/
 
 ## 11. Build milestones
 
-0. **Power sanity check first.** Flash a minimal sketch that does exactly the §3 sleep sequence
-   (SLPIN, rail cut, `EXT1` wake, no other peripherals active) and measure deep-sleep current on
-   battery power with a multimeter/USB power meter. Target: low hundreds of µA. Don't proceed to
-   app logic until this number is confirmed — it's the number the rest of the power budget
-   depends on.
+0. **Power sanity check first — done.** Flashed a minimal sketch (`firmware/src/main.cpp`) that
+   does the §3 sleep sequence (SLPIN, rail cut, `EXT1` wake, no other peripherals active) and
+   confirmed on hardware, on battery power: display init, 10s awake window, deep sleep entry
+   (USB drops, screen off), and button wake all work correctly. Also found and fixed a
+   battery-only-specific bug — `Serial` blocks on native USB-CDC with no host attached, see §3.
+   The actual current measurement (multimeter/USB power meter, target low hundreds of µA) was
+   **not done** — skipped for now; revisit before Milestone 8's battery validation if it still
+   hasn't been measured by then.
 1. **Display bring-up.** LVGL/TFT_eSPI demo running on battery power (not just USB); confirm
-   `PIN_POWER_ON`/backlight sequencing works on cold boot and after wake-from-sleep.
+   `PIN_POWER_ON`/backlight sequencing works on cold boot and after wake-from-sleep. Also
+   calibrate `USB_PRESENT_THRESHOLD_V` (§14) against a multimeter on your actual unit — the
+   ESP32-S3 ADC is imprecise enough that the starting constant shouldn't be trusted blind.
 2. **BLE peripheral skeleton.** NimBLE service + snapshot characteristic advertising; confirm
    discoverable with a generic BLE scanner (e.g. nRF Connect) before wiring up the bridge.
 3. **Host bridge CLI skeleton.** `tokenslate` package installable via `pip install -e`; `run`
@@ -389,12 +402,14 @@ tokenslate-tdisplay-s3/
    End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,
    connects, and renders real numbers within a couple seconds.
 6. **Power states & buttons.** Idle timeout, BOOT sleep-now, KEY short/long press classification,
-   `EXT1` wake-source dispatch, RTC-memory persistence across sleep cycles.
+   `EXT1` wake-source dispatch, RTC-memory persistence across sleep cycles, battery/USB icon
+   wired into the header on every screen (§14).
 7. **Robustness.** Stale/error/reconnecting visuals; bridge-side reconnect/backoff handling if
    the device isn't found on a scan pass.
 8. **Battery validation.** Run for several real days, log actual current draw per state, and
    compare against the §3 budget. Tune idle timeout if the awake-cycle cost is higher than
-   expected — this is now the main lever on battery life, not the sleep floor.
+   expected — this is now the main lever on battery life, not the sleep floor. If the Milestone 0
+   deep-sleep current was never measured, measure it here at the latest.
 
 ---
 
@@ -406,6 +421,8 @@ tokenslate-tdisplay-s3/
 | Idle timeout before sleep | 20–30s | Tune after Milestone 8 |
 | Providers | `codex`, `claude` | `tokenslate providers select`; both have local/CLI/OAuth CodexBar sources with no extra API key |
 | Battery capacity | not yet specified | Confirm cell/mAh to sanity-check the §3 budget table |
+| USB-present ADC threshold | ~4.4V (placeholder) | Must calibrate per-unit, see §14 and Milestone 1 |
+| Low-battery warning threshold | 15% | Icon switches to warning color below this, see §14 |
 | Board variant | assumed plain, non-touch, non-AMOLED | Confirm — affects display driver/pin_config only |
 | Build tool | PlatformIO | Assumed; swap for Arduino IDE if preferred, no other changes needed |
 
@@ -418,3 +435,88 @@ tokenslate-tdisplay-s3/
 - [steipete/CodexBar](https://github.com/steipete/CodexBar) — usage data source, CLI docs at `docs/cli.md`
 - `h2zero/NimBLE-Arduino` — BLE stack
 - `bleak` — Python cross-platform BLE library for the host bridge
+- [T-Display-S3 issue #254](https://github.com/Xinyuan-LilyGO/T-Display-S3/issues/254) — no dedicated charge/VBUS pin exists
+- [T-Display-S3 issue #230](https://github.com/Xinyuan-LilyGO/T-Display-S3/issues/230) — `BAT_ADC` divider behavior on battery vs. USB power
+
+---
+
+## 14. Battery meter & charging indicator
+
+Added after the base plan — extends §1, §2, §8, §10, §11, §12 above rather than replacing them.
+
+**Hardware constraint — read this before wiring anything up.** There is no pin exposed for
+charge/VBUS status on this board; this has been asked and left unresolved upstream:
+[Xinyuan-LilyGO/T-Display-S3#254](https://github.com/Xinyuan-LilyGO/T-Display-S3/issues/254).
+The board does have a physical charge-status LED next to the USB-C port (flashes/dim = no
+battery, solid = charging, off = charge complete), but it's wired directly to the charging IC,
+not to any ESP32 GPIO — firmware cannot read it, and there's no way to reproduce that exact
+tri-state distinction on screen without a hardware modification.
+
+**`GPIO4` (`BAT_ADC`) behaves differently depending on power source** — per LilyGO's README and
+confirmed independently in [#230](https://github.com/Xinyuan-LilyGO/T-Display-S3/issues/230):
+
+- **On battery only:** reads true battery voltage through a ~2:1 divider — multiply the ADC
+  voltage by 2.
+- **On USB power:** no longer reflects the battery at all — reads roughly half of VBUS instead
+  (~2.5V raw, ~5V once doubled). That's always higher than any real single-cell LiPo (max
+  ~4.2V), which is exactly what makes it usable as a "USB present" signal instead.
+
+**Design consequence:** the device can show an accurate battery percentage, or an accurate
+"running on USB power" state, but **cannot distinguish "actively charging" from "on USB, battery
+already full"** in software — that distinction only exists on the physical LED. Represent this
+honestly on screen: a plug icon meaning "on external power," not a charging-bolt icon implying a
+distinction the hardware doesn't actually expose.
+
+### Detection logic
+
+```cpp
+float readBatteryVoltage() {
+  int raw = analogRead(PIN_BAT_ADC);           // GPIO4
+  return (raw / 4095.0f) * 3.3f * 2.0f;         // 2:1 divider
+}
+
+PowerState readPowerState() {
+  float v = readBatteryVoltage();
+  if (v > USB_PRESENT_THRESHOLD_V)              // e.g. 4.4V — no real LiPo reads this high
+    return POWER_ON_USB;
+  return POWER_ON_BATTERY;
+}
+```
+
+`USB_PRESENT_THRESHOLD_V` needs calibrating against your actual unit — the ESP32-S3 ADC is
+known to be imprecise and non-linear, not just a datasheet footnote (see the readings in
+[#190](https://github.com/Xinyuan-LilyGO/T-Display-S3/issues/190)). Check it against a multimeter
+during bring-up rather than trusting a single hardcoded constant — folded into Milestone 1 above.
+
+### Voltage → percentage
+
+Single-cell LiPo discharge curve — a reasonable starting table; recalibrate against your actual
+battery if it drifts:
+
+| Voltage | % |
+|---|---|
+| 4.20V | 100 |
+| 3.98V | 80 |
+| 3.87V | 60 |
+| 3.79V | 40 |
+| 3.68V | 20 |
+| 3.45V | 0 (cutoff, before under-voltage protection) |
+
+Linearly interpolate between rows.
+
+### UI treatment
+
+Lives in the header row already present on every provider screen (§8), next to the
+connection/last-sync indicator:
+
+- **On battery:** battery-fill icon + percentage. Below the low-battery threshold (default 15%,
+  §12), the icon switches to a warning color — the same "never show a misleading number as if it
+  were fine" principle already applied to stale provider data.
+- **On USB:** a plug icon, no percentage — `GPIO4` isn't trustworthy here, so don't fabricate one.
+
+### Firmware module
+
+`power/battery.cpp .h` (§10) — owns `readBatteryVoltage()`, `readPowerState()`, the
+voltage→percent table, and the low-battery threshold check. Read once per screen render (on wake,
+on screen cycle, and once per idle-timeout tick if the icon should update while sitting awake) —
+cheap enough not to need its own timer. 
