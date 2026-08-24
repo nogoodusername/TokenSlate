@@ -1,0 +1,82 @@
+name: Build macOS companion app
+
+# Tag pushes (v*.*.*) build the app and publish it as a GitHub Release
+# asset. workflow_dispatch builds the same way but only uploads a
+# workflow artifact -- useful for testing the build without cutting a
+# release.
+#
+# Note: the app is only ad-hoc signed (no Apple Developer ID / notarization),
+# so anyone downloading it will need to right-click -> Open the first time
+# to get past Gatekeeper -- same as the local dev build. See docs §9.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install bridge package and macapp build deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e bridge/
+          python3 -m pip install rumps py2app
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build TokenSlate.app
+        working-directory: bridge/macapp
+        env:
+          TOKENSLATE_APP_VERSION: ${{ steps.version.outputs.version }}
+        run: python3 setup.py py2app
+
+      - name: Ad-hoc codesign
+        run: codesign --force --deep --sign - bridge/macapp/dist/TokenSlate.app
+
+      - name: Verify the bundle
+        run: codesign --verify --deep --strict --verbose=2 bridge/macapp/dist/TokenSlate.app
+
+      - name: Zip app bundle
+        env:
+          ZIP_NAME: TokenSlate-${{ steps.version.outputs.version }}-macos.zip
+        run: |
+          cd bridge/macapp/dist
+          ditto -c -k --sequesterRsrc --keepParent TokenSlate.app "$ZIP_NAME"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TokenSlate-macos
+          path: bridge/macapp/dist/TokenSlate-*.zip
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP_NAME: TokenSlate-${{ steps.version.outputs.version }}-macos.zip
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "bridge/macapp/dist/$ZIP_NAME" \
+            --title "TokenSlate $GITHUB_REF_NAME" \
+            --generate-notes

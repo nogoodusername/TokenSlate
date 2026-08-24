@@ -441,6 +441,21 @@ tokenslate-tdisplay-s3/
    - **launchd PATH**: launchd services run with a minimal PATH that excludes Homebrew's
      `/opt/homebrew/bin`, so the installed service couldn't find `codexbar` at all until
      `codexbar.py` resolved it explicitly via `shutil.which()` with fallback paths.
+
+   **macOS companion app (`bridge/macapp/`) — added after the base plan.** A `rumps` menu bar
+   app wrapping the same refresh + BLE loops, run in-process (not shelled out to the `tokenslate`
+   CLI) specifically so macOS's Bluetooth permission prompt attributes to "TokenSlate" instead of
+   a bare `python3` interpreter. Build with `cd bridge/macapp && python3 setup.py py2app`
+   (requires `pip install -e bridge/` first, plus `rumps`/`py2app`). Two bugs found:
+   `rumps.MenuItem(callback=...)` doesn't fire once bundled by py2app — use the
+   `@rumps.clicked("label")` decorator instead; and `subprocess.run()` needs `encoding="utf-8"`
+   explicitly, since py2app bundles run with `locale=C/POSIX` by default. The built app is only
+   ad-hoc signed (no paid Apple Developer ID / notarization), so first launch needs a right-click
+   → Open in Finder to get past Gatekeeper — plain `open`/double-click and direct binary
+   execution both fail silently otherwise. CI: `.github/workflows/macapp-release.yml` builds and
+   ad-hoc-signs the app on every `v*.*.*` tag push and attaches the zipped bundle to a GitHub
+   Release (`workflow_dispatch` also builds, uploading a workflow artifact instead for testing
+   without cutting a release).
 4. **Screen UI.** Build the provider card screen against hardcoded placeholder data.
 5. **Wire it live.** Connect the bridge's payload into the UI via the BLE write handler.
    End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,

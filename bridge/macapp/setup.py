@@ -6,7 +6,11 @@ Produces dist/TokenSlate.app. Requires the `tokenslate` package to be
 installed (pip install -e bridge/) so its modules can be found.
 """
 
+import os
+
 from setuptools import setup
+
+APP_VERSION = os.environ.get("TOKENSLATE_APP_VERSION", "0.1.0")
 
 APP = ["tokenslate_app.py"]
 OPTIONS = {
@@ -15,7 +19,7 @@ OPTIONS = {
         "CFBundleName": "TokenSlate",
         "CFBundleDisplayName": "TokenSlate",
         "CFBundleIdentifier": "com.tokenslate.macapp",
-        "CFBundleShortVersionString": "0.1.0",
+        "CFBundleShortVersionString": APP_VERSION,
         "LSUIElement": True,  # menu-bar only, no Dock icon
         "NSBluetoothAlwaysUsageDescription": (
             "TokenSlate needs Bluetooth to sync usage data to your "
