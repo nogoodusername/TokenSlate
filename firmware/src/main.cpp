@@ -145,6 +145,8 @@ void setup()
     initBleService(DEVICE_NAME);
 }
 
+#define BATTERY_RESAMPLE_MS 5000UL
+
 void loop()
 {
     if (bleHasNewSnapshot()) {
@@ -152,6 +154,16 @@ void loop()
         if (bleConsumeSnapshotJson(json, sizeof(json))) {
             handleSnapshot(json);
         }
+    }
+
+    /* Battery/USB was previously only sampled once at boot, so the
+     * indicator went stale as soon as the power source changed (e.g.
+     * unplugging USB) without a reboot. Re-sample periodically instead. */
+    static unsigned long lastBatterySample = 0;
+    if (millis() - lastBatterySample >= BATTERY_RESAMPLE_MS) {
+        lastBatterySample = millis();
+        batteryVoltage = readBatteryVoltage();
+        renderCurrentPage();
     }
 
     /* KEY short press = next provider screen, per §6. */

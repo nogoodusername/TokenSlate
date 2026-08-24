@@ -503,6 +503,14 @@ tokenslate-tdisplay-s3/
    Still a known limitation: `p1`/`p2` only cover a provider's first two `windows[]` (see
    Milestone 3's note) — revisit once providers with 3 windows (cursor, commandcode) need their
    full data shown, not just the first two.
+
+   Also fixed: the battery/USB indicator was only sampled once at boot (before `initDisplay()`,
+   per §3), so it went stale the moment the power source changed without a reboot (e.g.
+   unplugging USB left it stuck showing "USB"). `main.cpp`'s loop now re-samples every 5s and
+   re-renders. This is the first time the ADC has been read *repeatedly* while USB is attached
+   (every prior test only ever called it once at boot) — confirmed stable on hardware over a 25s
+   window with USB connected, no repeat of the Milestone 1 USB-attached hang, but flag it if
+   instability ever resurfaces since that bug was never actually root-caused, only avoided.
 6. **Power states & buttons.** Idle timeout, BOOT sleep-now, KEY short/long press classification,
    `EXT1` wake-source dispatch, RTC-memory persistence across sleep cycles, battery/USB icon
    wired into the header on every screen (§14).
