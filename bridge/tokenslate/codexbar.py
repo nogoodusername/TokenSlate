@@ -33,6 +33,7 @@ def _run(args: list[str], timeout: float) -> str:
             [_codexbar_path(), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout + 5,
         )
     except FileNotFoundError as e:
