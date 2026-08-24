@@ -12,6 +12,7 @@ import asyncio
 import json
 import sys
 import threading
+from datetime import datetime, timezone
 
 import rumps
 
@@ -77,7 +78,17 @@ class TokenSlateApp(rumps.App):
 
     def _refresh_ui(self, _timer: rumps.Timer) -> None:
         self.status_item.title = f"BLE: {self._ble_status}"
-        self.sync_item.title = f"Last sync: {self._last_sync or 'never'}"
+        self.sync_item.title = f"Last sync: {self._format_sync_time()}"
+
+    def _format_sync_time(self) -> str:
+        if not self._last_sync:
+            return "never"
+        try:
+            dt = datetime.fromisoformat(self._last_sync.replace("Z", "+00:00"))
+            local = dt.astimezone()
+            return local.strftime("%-I:%M %p")
+        except (ValueError, TypeError):
+            return self._last_sync
 
     @rumps.clicked("About TokenSlate")
     def show_about(self, _sender: rumps.MenuItem) -> None:
