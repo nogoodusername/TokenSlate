@@ -77,3 +77,17 @@ void enterSleep(TFT_eSPI &tft)
 
     esp_deep_sleep_start();
 }
+
+WakeSource getWakeSource()
+{
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) {
+        return WAKE_SOURCE_NONE;
+    }
+    uint64_t mask = esp_sleep_get_ext1_wakeup_status();
+    bool boot = mask & (1ULL << PIN_BUTTON_1);
+    bool key  = mask & (1ULL << PIN_BUTTON_2);
+    if (boot && key) return WAKE_SOURCE_BOTH;
+    if (boot) return WAKE_SOURCE_BOOT;
+    if (key)  return WAKE_SOURCE_KEY;
+    return WAKE_SOURCE_NONE;
+}

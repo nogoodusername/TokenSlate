@@ -511,9 +511,24 @@ tokenslate-tdisplay-s3/
    (every prior test only ever called it once at boot) — confirmed stable on hardware over a 25s
    window with USB connected, no repeat of the Milestone 1 USB-attached hang, but flag it if
    instability ever resurfaces since that bug was never actually root-caused, only avoided.
-6. **Power states & buttons.** Idle timeout, BOOT sleep-now, KEY short/long press classification,
-   `EXT1` wake-source dispatch, RTC-memory persistence across sleep cycles, battery/USB icon
-   wired into the header on every screen (§14).
+6. **Power states & buttons — done.** Confirmed on hardware:
+   - `storage.cpp .h` (new, per repo layout): `ProviderCardData[]` + reset-text buffers +
+     provider count/current page all moved to `RTC_DATA_ATTR`, so the last-known screen redraws
+     instantly on wake, before any fresh BLE sync arrives. Only lost on a true power-on reset.
+   - Idle timeout: 25s of no button activity (§12 default range) triggers the same `enterSleep()`
+     as BOOT. Confirmed firing right on schedule in a clean test window.
+   - `EXT1` wake-source dispatch (`sleep_states.h`'s `getWakeSource()`): waking via KEY advances
+     to the next screen, waking via BOOT (or a plain power-on) just resumes whatever was last
+     shown, per §5.
+   - KEY short/long press classification: measures actual hold duration (not just a fixed
+     debounce) -- short press cycles screens, long press (≥500ms) calls the new
+     `bleForceReadvertise()` (disconnects any lingering connection + restarts advertising, so the
+     bridge's next scan pass finds the device sooner rather than waiting out the rest of the
+     current interval — there's no separate "request" characteristic in this protocol, see §7).
+   - Reconfirmed the spurious-wake quirk noted since Milestone 0/1: the device occasionally wakes
+     with no button press logged, most likely BOOT (GPIO0) getting bumped during USB cable
+     handling since it sits right next to the connector — not a regression, already priced into
+     the design (EXT1 wake is "free" either way, per §5).
 7. **Robustness.** Stale/error/reconnecting visuals; bridge-side reconnect/backoff handling if
    the device isn't found on a scan pass.
 8. **Battery validation.** Run for several real days, log actual current draw per state, and

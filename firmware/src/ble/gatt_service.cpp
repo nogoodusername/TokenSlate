@@ -118,3 +118,12 @@ bool bleConsumeSnapshotJson(char *buf, size_t bufLen)
     memcpy(buf, s_snapshotBuf, len + 1);
     return true;
 }
+
+void bleForceReadvertise()
+{
+    if (s_connected) {
+        s_server->disconnect(s_server->getConnId());
+    }
+    BLEDevice::startAdvertising();
+    logLine("[TokenSlate] forced re-advertise (KEY long press)");
+}

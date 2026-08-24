@@ -34,3 +34,10 @@ bool bleHasNewSnapshot();
  * new is waiting, or the payload doesn't fit in bufLen. Clears the
  * "new snapshot" flag either way once called. */
 bool bleConsumeSnapshotJson(char *buf, size_t bufLen);
+
+/* KEY long press = force a resync now (§6). The bridge is already
+ * scanning continuously while the device is awake (docs §9), so there's
+ * no separate "request" characteristic -- this just restarts
+ * advertising so the bridge's next scan pass finds the device sooner
+ * rather than waiting out whatever's left of the current interval. */
+void bleForceReadvertise();

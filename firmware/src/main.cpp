@@ -7,28 +7,33 @@
 #include "board_pins.h"
 #include "power/battery.h"
 #include "power/sleep_states.h"
+#include "storage.h"
 #include "ui/screens.h"
 #include "ui/theme.h"
 
 /* ------------------------------------------------------------------ */
-/*  TokenSlate — Milestone 5: wire it live                             */
-/*  Parses the bridge's real BLE snapshot writes (docs §7) and renders */
-/*  real provider cards (Milestone 4's UI). KEY cycles providers,      */
-/*  BOOT sleeps immediately (§6). No idle-timeout auto-sleep or        */
-/*  RTC-memory persistence yet -- that's Milestone 6.                  */
+/*  TokenSlate — Milestone 6: power states & buttons                   */
+/*  Idle timeout, BOOT sleep-now, KEY short/long press, EXT1           */
+/*  wake-source dispatch, RTC-memory persistence across sleep (§5/§6). */
 /* ------------------------------------------------------------------ */
 
 #define DEVICE_NAME "TokenSlate-"
-#define MAX_PROVIDERS 8
+
+#define IDLE_TIMEOUT_MS 25000UL   // §12: 20-30s default
+#define LONG_PRESS_MS   500UL     // §6: "held ~300-500ms after the wake ISR runs"
+#define BATTERY_RESAMPLE_MS 5000UL
 
 TFT_eSPI tft = TFT_eSPI();
 
-static ProviderCardData providers[MAX_PROVIDERS];
-static char resetTextBuf[MAX_PROVIDERS][24];
-static uint8_t providerCount = 0;
-static uint8_t currentPage = 0;
-static bool haveData = false;
+static ProviderCardData *providers;
+static char (*resetTextBuf)[24];
+static unsigned long lastActivity = 0;
 static float batteryVoltage = 0.0f;
+
+static void resetIdleTimer()
+{
+    lastActivity = millis();
+}
 
 static void formatCountdown(char *buf, size_t bufLen, long secondsRemaining)
 {
@@ -50,9 +55,10 @@ static void formatCountdown(char *buf, size_t bufLen, long secondsRemaining)
 
 static void renderCurrentPage()
 {
-    if (!haveData) return;
-    providers[currentPage].pageIndex = currentPage;
-    renderProviderCard(tft, providers[currentPage], batteryVoltage);
+    if (!storageHaveData()) return;
+    uint8_t page = storageCurrentPage();
+    providers[page].pageIndex = page;
+    renderProviderCard(tft, providers[page], batteryVoltage);
 }
 
 static void renderWaitingScreen()
@@ -82,7 +88,7 @@ static void handleSnapshot(const char *json)
     uint8_t count = 0;
 
     for (JsonObject p : arr) {
-        if (count >= MAX_PROVIDERS) break;
+        if (count >= MAX_STORED_PROVIDERS) break;
 
         const char *id = p["i"] | "?";
         strncpy(providers[count].id, id, sizeof(providers[count].id) - 1);
@@ -111,15 +117,37 @@ static void handleSnapshot(const char *json)
 
     if (count == 0) return;
 
-    providerCount = count;
-    for (uint8_t i = 0; i < providerCount; i++) {
-        providers[i].pageCount = providerCount;
+    storageSetProviderCount(count);
+    for (uint8_t i = 0; i < count; i++) {
+        providers[i].pageCount = count;
     }
-    if (currentPage >= providerCount) currentPage = 0;
-    haveData = true;
+    if (storageCurrentPage() >= count) storageSetCurrentPage(0);
+    storageSetHaveData(true);
 
-    if (Serial) Serial.printf("[TokenSlate] snapshot applied: %u providers\n", providerCount);
+    if (Serial) Serial.printf("[TokenSlate] snapshot applied: %u providers\n", count);
     renderCurrentPage();
+}
+
+/* KEY: short press = next screen, long press = force a resync now (§6).
+ * Blocks until release, which is fine -- the debounce/hold-measurement
+ * loop is the only thing happening while a button is actually held. */
+static void handleKeyPress()
+{
+    delay(30); /* debounce */
+    if (digitalRead(PIN_BUTTON_2) != LOW) return; /* was noise */
+
+    unsigned long pressStart = millis();
+    while (digitalRead(PIN_BUTTON_2) == LOW) delay(10);
+    unsigned long heldMs = millis() - pressStart;
+
+    if (heldMs >= LONG_PRESS_MS) {
+        bleForceReadvertise();
+    } else if (storageHaveData()) {
+        uint8_t next = (storageCurrentPage() + 1) % storageProviderCount();
+        storageSetCurrentPage(next);
+        renderCurrentPage();
+    }
+    resetIdleTimer();
 }
 
 void setup()
@@ -138,14 +166,30 @@ void setup()
     pinMode(PIN_BUTTON_2, INPUT_PULLUP);
 
     recordBootAndPrintWakeReason();
+    WakeSource wakeSource = getWakeSource();
+
+    providers = storageProviders();
+    resetTextBuf = storageResetTextBuf();
 
     initDisplay(tft);
-    renderWaitingScreen();
+
+    if (storageHaveData()) {
+        /* §5: waking via KEY jumps to the next screen; BOOT (or a plain
+         * power-on) just resumes whatever was last shown. Renders from
+         * the RTC-persisted cache instantly, before any fresh BLE write
+         * arrives. */
+        if (wakeSource == WAKE_SOURCE_KEY) {
+            uint8_t next = (storageCurrentPage() + 1) % storageProviderCount();
+            storageSetCurrentPage(next);
+        }
+        renderCurrentPage();
+    } else {
+        renderWaitingScreen();
+    }
 
     initBleService(DEVICE_NAME);
+    resetIdleTimer();
 }
-
-#define BATTERY_RESAMPLE_MS 5000UL
 
 void loop()
 {
@@ -166,14 +210,8 @@ void loop()
         renderCurrentPage();
     }
 
-    /* KEY short press = next provider screen, per §6. */
     if (digitalRead(PIN_BUTTON_2) == LOW) {
-        delay(30); /* debounce */
-        if (digitalRead(PIN_BUTTON_2) == LOW && haveData) {
-            currentPage = (currentPage + 1) % providerCount;
-            renderCurrentPage();
-            while (digitalRead(PIN_BUTTON_2) == LOW) delay(10); /* wait for release */
-        }
+        handleKeyPress();
     }
 
     /* BOOT press = sleep now, per §6. */
@@ -182,6 +220,10 @@ void loop()
         if (digitalRead(PIN_BUTTON_1) == LOW) {
             enterSleep(tft);
         }
+    }
+
+    if (millis() - lastActivity >= IDLE_TIMEOUT_MS) {
+        enterSleep(tft);
     }
 
     delay(50);
