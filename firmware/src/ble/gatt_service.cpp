@@ -4,6 +4,7 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <string.h>
 
 /* Placeholder UUIDs from docs §7 -- replace with generated ones before
  * shipping. */
@@ -14,6 +15,9 @@ static BLEServer *s_server = nullptr;
 static BLECharacteristic *s_snapshotChar = nullptr;
 static bool s_connected = false;
 static uint16_t s_lastWriteLength = 0;
+
+static char s_snapshotBuf[BLE_SNAPSHOT_MAX_LEN];
+static volatile bool s_hasNewSnapshot = false;
 
 static void logLine(const char *fmt, ...)
 {
@@ -45,11 +49,20 @@ class TokenSlateServerCallbacks : public BLEServerCallbacks
 
 class SnapshotWriteCallbacks : public BLECharacteristicCallbacks
 {
+    /* Runs in the BLE stack's callback context -- keep this minimal
+     * (copy bytes only), do JSON parsing from the main loop instead. */
     void onWrite(BLECharacteristic *characteristic) override
     {
         std::string value = characteristic->getValue();
         s_lastWriteLength = (uint16_t)value.length();
-        logLine("[TokenSlate] snapshot write: %u bytes", (unsigned)value.length());
+        if (value.length() < sizeof(s_snapshotBuf)) {
+            memcpy(s_snapshotBuf, value.data(), value.length());
+            s_snapshotBuf[value.length()] = '\0';
+            s_hasNewSnapshot = true;
+        } else {
+            logLine("[TokenSlate] snapshot write too large: %u bytes (max %u)",
+                    (unsigned)value.length(), (unsigned)sizeof(s_snapshotBuf) - 1);
+        }
     }
 };
 
@@ -87,4 +100,21 @@ bool bleIsConnected()
 uint16_t bleLastWriteLength()
 {
     return s_lastWriteLength;
+}
+
+bool bleHasNewSnapshot()
+{
+    return s_hasNewSnapshot;
+}
+
+bool bleConsumeSnapshotJson(char *buf, size_t bufLen)
+{
+    if (!s_hasNewSnapshot) return false;
+    s_hasNewSnapshot = false;
+
+    size_t len = strlen(s_snapshotBuf);
+    if (len >= bufLen) return false;
+
+    memcpy(buf, s_snapshotBuf, len + 1);
+    return true;
 }

@@ -26,7 +26,7 @@ enum ConnectionStatus {
 };
 
 struct ProviderCardData {
-    const char *id;
+    char id[16];
     const char *name;
     uint8_t sessionUsedPercent;   // primary window
     uint8_t weeklyUsedPercent;    // secondary window

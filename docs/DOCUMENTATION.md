@@ -483,9 +483,26 @@ tokenslate-tdisplay-s3/
    reset countdown text below it, page dots at the bottom. KEY cycles providers, BOOT still
    sleeps immediately (§6). No idle-timeout auto-sleep in this milestone's firmware — that's
    Milestone 6.
-5. **Wire it live.** Connect the bridge's payload into the UI via the BLE write handler.
-   End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,
-   connects, and renders real numbers within a couple seconds.
+5. **Wire it live — done.** Real BLE snapshot writes now parse (ArduinoJson v7) and render as
+   provider cards, confirmed end-to-end on hardware with 3 real providers (claude/cursor/
+   commandcode) cycling correctly via KEY. Two real bugs found and fixed:
+   - **JSON parsing was in the BLE write callback's interrupt context.** Moved to `main.cpp`'s
+     loop instead (`ble/gatt_service.cpp` now just copies bytes and sets a dirty flag,
+     `bleHasNewSnapshot()`/`bleConsumeSnapshotJson()`), matching the pattern already documented
+     in the `T-Display-S3-PC-HW-Monitor` reference ("this runs in interrupt context - keep it
+     minimal").
+   - **`BLE_SNAPSHOT_MAX_LEN` was sized for docs §7's single-MTU estimate (~240B), not for
+     however many providers are actually configured.** A 3-provider payload is 272 bytes and got
+     silently rejected. Bluedroid reassembles a long characteristic write into one `onWrite()`
+     call regardless of how many ATT PDUs it took, so the real ceiling is provider count, not
+     MTU size — bumped the buffer to 1024B (comfortably fits `MAX_PROVIDERS` = 8).
+   - Also found (not a firmware bug): the macOS companion app only loaded `config.yaml` once at
+     launch, so provider/config changes made via the CLI while the app was already running never
+     took effect without a manual relaunch. Fixed by reloading config from disk at the top of
+     every refresh cycle in `tokenslate_app.py`.
+   Still a known limitation: `p1`/`p2` only cover a provider's first two `windows[]` (see
+   Milestone 3's note) — revisit once providers with 3 windows (cursor, commandcode) need their
+   full data shown, not just the first two.
 6. **Power states & buttons.** Idle timeout, BOOT sleep-now, KEY short/long press classification,
    `EXT1` wake-source dispatch, RTC-memory persistence across sleep cycles, battery/USB icon
    wired into the header on every screen (§14).

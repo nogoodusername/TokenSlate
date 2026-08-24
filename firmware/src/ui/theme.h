@@ -27,3 +27,13 @@ static inline uint16_t providerColor(const char *id)
     if (!strcmp(id, "cursor")) return COLOR_CURSOR;
     return COLOR_DEFAULT;
 }
+
+/* The bridge only sends the raw CodexBar provider id (docs §7) --
+ * capitalize known ones for display, fall back to the id itself. */
+static inline const char *providerDisplayName(const char *id)
+{
+    if (!strcmp(id, "codex"))  return "Codex";
+    if (!strcmp(id, "claude")) return "Claude";
+    if (!strcmp(id, "cursor")) return "Cursor";
+    return id;
+}

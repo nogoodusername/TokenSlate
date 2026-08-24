@@ -91,6 +91,7 @@ class TokenSlateApp(rumps.App):
     def _refresh_ui(self, _timer: rumps.Timer) -> None:
         self.status_item.title = f"BLE: {self._ble_status}"
         self.sync_item.title = f"Last sync: {self._format_sync_time()}"
+        self.device_item.title = f"Device: {self.cfg.device_name_prefix}"
         if self._devices_dirty:
             self._devices_dirty = False
             self._rebuild_found_devices_menu()
@@ -195,6 +196,11 @@ class TokenSlateApp(rumps.App):
 
     async def _refresh_loop(self) -> None:
         while self._running:
+            # Reload from disk each pass -- config.yaml can change out
+            # from under this already-running process (e.g. `tokenslate
+            # providers select` run separately), and self.cfg was
+            # otherwise only ever read once at app launch.
+            self.cfg = Config.load()
             state = State.load() or State()
             try:
                 dashboard = fetch_dashboard()
