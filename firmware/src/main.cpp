@@ -1,36 +1,35 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
-#include <esp_system.h>
 
-#include "ble/gatt_service.h"
 #include "board_pins.h"
+#include "power/battery.h"
 #include "power/sleep_states.h"
 #include "ui/screens.h"
 
 /* ------------------------------------------------------------------ */
-/*  TokenSlate — Milestone 2: BLE peripheral skeleton                  */
-/*  Advertises the TokenSlate service + snapshot characteristic (§7).  */
-/*  Stays awake indefinitely (no idle timeout) so it can be found and  */
-/*  connected to with a generic BLE scanner (e.g. nRF Connect); BOOT   */
-/*  still sleeps immediately, per §6.                                  */
+/*  TokenSlate — Milestone 4: screen UI                                 */
+/*  Provider card layout (§8) against hardcoded placeholder data --     */
+/*  wired to real BLE data in Milestone 5. KEY cycles providers, BOOT   */
+/*  sleeps immediately, per §6. Stays awake indefinitely otherwise so   */
+/*  the UI can be inspected at leisure -- idle-timeout auto-sleep is    */
+/*  Milestone 6's concern.                                              */
 /* ------------------------------------------------------------------ */
-
-#define DEVICE_NAME "TokenSlate-"
 
 TFT_eSPI tft = TFT_eSPI();
 
-static void renderBleStatus(bool connected, uint16_t lastWriteLen)
+static ProviderCardData providers[] = {
+    {"codex",  "Codex",  28, 41, "resets in 3h 12m",  STATUS_LIVE,  0, 3},
+    {"claude", "Claude", 92, 63, "resets in 1d 4h",   STATUS_STALE, 1, 3},
+    {"cursor", "Cursor", 5,  97, "resets in 6d 20h",  STATUS_ERROR, 2, 3},
+};
+static const uint8_t providerCount = sizeof(providers) / sizeof(providers[0]);
+static uint8_t currentPage = 0;
+static float batteryVoltage = 0.0f;
+
+static void renderCurrentPage()
 {
-    tft.fillRect(0, 105, 320, 65, TFT_BLUE);
-    tft.setTextColor(TFT_WHITE, TFT_BLUE);
-
-    char line1[48];
-    snprintf(line1, sizeof(line1), "BLE: %s", connected ? "connected" : "advertising");
-    tft.drawString(line1, 10, 105, 2);
-
-    char line2[48];
-    snprintf(line2, sizeof(line2), "last write: %u bytes", (unsigned)lastWriteLen);
-    tft.drawString(line2, 10, 130, 2);
+    providers[currentPage].pageIndex = currentPage;
+    renderProviderCard(tft, providers[currentPage], batteryVoltage);
 }
 
 void setup()
@@ -39,38 +38,31 @@ void setup()
     Serial.setTxTimeoutMs(0);
     delay(50);
 
+    /* Sample the battery ADC before touching the LCD bus at all -- see
+     * docs §3 / power/battery.cpp. */
+    batteryVoltage = readBatteryVoltage();
+
     pinMode(PIN_POWER_ON, OUTPUT);
     digitalWrite(PIN_POWER_ON, HIGH);
     pinMode(PIN_BUTTON_1, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_2, INPUT_PULLUP);
 
-    uint32_t bootCount = recordBootAndPrintWakeReason();
+    recordBootAndPrintWakeReason();
 
     initDisplay(tft);
-    tft.fillScreen(TFT_BLUE);
-    tft.setTextColor(TFT_WHITE, TFT_BLUE);
-    tft.drawString("TokenSlate M2", 10, 10, 4);
-    tft.drawString("BLE peripheral", 10, 50, 2);
-
-    char hud[48];
-    snprintf(hud, sizeof(hud), "boot #%lu  reset: %s",
-             (unsigned long)bootCount, resetReasonName(esp_reset_reason()));
-    tft.drawString(hud, 10, 80, 2);
-
-    initBleService(DEVICE_NAME);
-    renderBleStatus(false, 0);
+    renderCurrentPage();
 }
 
 void loop()
 {
-    static bool lastConnected = false;
-    static uint16_t lastWriteLen = 0;
-
-    bool connected = bleIsConnected();
-    uint16_t writeLen = bleLastWriteLength();
-    if (connected != lastConnected || writeLen != lastWriteLen) {
-        lastConnected = connected;
-        lastWriteLen = writeLen;
-        renderBleStatus(connected, writeLen);
+    /* KEY short press = next provider screen, per §6. */
+    if (digitalRead(PIN_BUTTON_2) == LOW) {
+        delay(30); /* debounce */
+        if (digitalRead(PIN_BUTTON_2) == LOW) {
+            currentPage = (currentPage + 1) % providerCount;
+            renderCurrentPage();
+            while (digitalRead(PIN_BUTTON_2) == LOW) delay(10); /* wait for release */
+        }
     }
 
     /* BOOT press = sleep now, per §6. */

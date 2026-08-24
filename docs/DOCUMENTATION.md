@@ -474,7 +474,15 @@ tokenslate-tdisplay-s3/
    (`find_device`/`write_to_device` as separate steps) — the scan (and permission trigger) now
    happens every pass regardless of payload state; only the write is skipped if there's nothing
    to send yet.
-4. **Screen UI.** Build the provider card screen against hardcoded placeholder data.
+4. **Screen UI — done.** Provider card layout confirmed on hardware against 3 hardcoded
+   providers covering live/stale/error states (`ui/screens.cpp`: `renderProviderCard()`,
+   `ui/theme.h` for per-provider colors). Colored dot + name top-left, connection status
+   top-right, battery/USB indicator top-center (moved there from top-right after visual
+   review — reads better alongside the status text), session % as a radial ring
+   (`TFT_eSPI::drawArc`) with the number centered inside, weekly % as a horizontal bar with
+   reset countdown text below it, page dots at the bottom. KEY cycles providers, BOOT still
+   sleeps immediately (§6). No idle-timeout auto-sleep in this milestone's firmware — that's
+   Milestone 6.
 5. **Wire it live.** Connect the bridge's payload into the UI via the BLE write handler.
    End-to-end check: bridge refreshes its cache every 5 minutes; device wakes on a button press,
    connects, and renders real numbers within a couple seconds.
