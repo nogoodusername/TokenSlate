@@ -405,8 +405,17 @@ tokenslate-tdisplay-s3/
    `USB_PRESENT_THRESHOLD_V` (§14) still needs calibrating against a multimeter on your actual
    unit — the ESP32-S3 ADC is imprecise enough that the starting constant shouldn't be trusted
    blind.
-2. **BLE peripheral skeleton.** NimBLE service + snapshot characteristic advertising; confirm
-   discoverable with a generic BLE scanner (e.g. nRF Connect) before wiring up the bridge.
+2. **BLE peripheral skeleton — done.** Service + snapshot characteristic advertising
+   (`firmware/src/ble/gatt_service.cpp .h`), confirmed on hardware with the `blew` macOS BLE CLI:
+   device discoverable as `TokenSlate-`, service/characteristic UUIDs match §7 exactly, connect
+   → write → `onWrite` fires with the correct byte count → disconnect → re-advertising resumes
+   automatically. **Deviates from §8's original plan:** uses the framework's built-in Bluedroid
+   BLE stack (`BLEDevice.h` etc.) instead of NimBLE-Arduino — matches the proven-working
+   reference on this exact board (`T-Display-S3-PC-HW-Monitor`) rather than risking another
+   from-scratch BLE bring-up debugging cycle. Revisit NimBLE for its lower power footprint once
+   this path is proven end-to-end, folded into Milestone 8's battery validation. This milestone's
+   firmware stays awake indefinitely (no idle timeout) so it can be found/connected to at a
+   scanner's pace; BOOT still sleeps immediately per §6.
 3. **Host bridge CLI skeleton.** `tokenslate` package installable via `pip install -e`; `run`
    command doing config loading, `codexbar dashboard` invocation + slimming, the background
    refresh loop, and a connect-and-write cycle against the Milestone 2 skeleton; `providers`,
